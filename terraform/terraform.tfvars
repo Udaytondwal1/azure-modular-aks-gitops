@@ -1,0 +1,12 @@
+resource_group_name = "rg-aks-prod"
+location            = "eastus"
+acr_name            = "acrprodaksdemo01"
+aks_name            = "aks-prod-cluster"
+vnet_name           = "vnet-aks-prod"
+vnet_cidr           = "10.0.0.0/16"
+subnet_name         = "snet-aks-nodes"
+subnet_cidr         = "10.0.1.0/24"
+node_count          = 2
+vm_size             = "Standard_D2s_v3"
+os_disk_size_gb     = 30
+acr_sku             = "Standard"

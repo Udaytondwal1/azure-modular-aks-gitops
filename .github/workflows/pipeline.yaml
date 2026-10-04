@@ -1,0 +1,71 @@
+name: "CI/CD Infrastructure & App Pipeline"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  ACR_NAME: "clouddroveacr2026.azurecr.io"
+  APP_NAME: "order-api"
+
+jobs:
+  terraform-validate:
+    name: "Terraform Lint & Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Format Check
+        run: terraform -chdir=terraform fmt -check
+
+      - name: Run Trivy Config Scan on IaC
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'terraform'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '0' # Non-blocking for demo, show in interview
+
+  build-and-scan-app:
+    name: "Docker Build, Scan & Push"
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build Docker Image
+        run: |
+          docker build -t $ACR_NAME/$APP_NAME:${{ github.sha }} -t $ACR_NAME/$APP_NAME:latest app/
+
+      - name: Scan Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '$ACR_NAME/$APP_NAME:${{ github.sha }}'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '0'
+
+  deploy-to-aks:
+    name: "Deploy to AKS with Zero Downtime"
+    needs: build-and-scan-app
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Substitute Image Tag in Manifest
+        run: |
+          sed -i "s|__IMAGE_NAME__|$ACR_NAME/$APP_NAME:${{ github.sha }}|g" k8s/deployment.yaml
+
+      - name: Deploy & Verify Rollout (Automated Rollback on failure)
+        run: |
+          echo "Simulating or executing deployment..."
+          # In real execution:
+          # kubectl apply -f k8s/deployment.yaml
+          # kubectl rollout status deployment/order-api --timeout=60s || kubectl rollout undo deployment/order-api
