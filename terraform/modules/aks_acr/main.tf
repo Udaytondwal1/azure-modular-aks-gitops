@@ -20,6 +20,10 @@ resource "azurerm_kubernetes_cluster" "aks" {
     os_disk_size_gb = var.os_disk_size_gb
   }
 
+  node_provisioning_profile {
+    mode = "Manual"
+  }
+
   identity {
     type = "SystemAssigned"
   }
