@@ -69,3 +69,14 @@ variable "acr_sku" {
   type        = string
   default     = "Standard"
 }
+
+variable "service_cidr" {
+  description = "CIDR range for Kubernetes services"
+  type        = string
+}
+
+variable "dns_service_ip" {
+  description = "IP address for the Kubernetes DNS service"
+  type        = string
+}
+

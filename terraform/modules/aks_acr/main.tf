@@ -29,12 +29,14 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   network_profile {
-    network_plugin = "azure"
-    network_policy = "azure"
+    network_plugin    = "azure"
+    network_policy    = "azure"
+    service_cidr      = var.service_cidr
+    dns_service_ip    = var.dns_service_ip
+    load_balancer_sku = "standard"
   }
 }
 
-# Allow AKS kubelet identity to pull directly from ACR
 resource "azurerm_role_assignment" "acr_pull" {
   scope                = azurerm_container_registry.acr.id
   role_definition_name = "AcrPull"

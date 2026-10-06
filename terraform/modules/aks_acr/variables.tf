@@ -52,3 +52,12 @@ variable "os_disk_size_gb" {
   type        = number
   default     = 30
 }
+
+
+variable "service_cidr" {
+  type = string
+}
+
+variable "dns_service_ip" {
+  type = string
+}

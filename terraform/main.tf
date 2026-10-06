@@ -24,4 +24,6 @@ module "aks_acr" {
   node_count          = var.node_count
   vm_size             = var.vm_size
   os_disk_size_gb     = var.os_disk_size_gb
+  service_cidr        = var.service_cidr
+  dns_service_ip      = var.dns_service_ip
 }

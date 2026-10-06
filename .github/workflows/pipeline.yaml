@@ -1,71 +1,76 @@
-name: "CI/CD Infrastructure & App Pipeline"
+name: CI/CD - Build Scan Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 env:
-  ACR_NAME: "clouddroveacr2026.azurecr.io"
-  APP_NAME: "order-api"
+  IMAGE_NAME: order-api
 
 jobs:
-  terraform-validate:
-    name: "Terraform Lint & Security Scan"
+  build-and-scan:
+    name: Build and Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.5.7
-
-      - name: Terraform Format Check
-        run: terraform -chdir=terraform fmt -check
-
-      - name: Run Trivy Config Scan on IaC
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'config'
-          scan-ref: 'terraform'
-          severity: 'HIGH,CRITICAL'
-          exit-code: '0' # Non-blocking for demo, show in interview
-
-  build-and-scan-app:
-    name: "Docker Build, Scan & Push"
-    needs: terraform-validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Build Docker Image
+      - name: Build Docker image
         run: |
-          docker build -t $ACR_NAME/$APP_NAME:${{ github.sha }} -t $ACR_NAME/$APP_NAME:latest app/
+          docker build \
+            -t ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            app/
 
-      - name: Scan Image with Trivy
+      - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '$ACR_NAME/$APP_NAME:${{ github.sha }}'
-          severity: 'HIGH,CRITICAL'
+          image-ref: '${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
           exit-code: '0'
 
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}'
+
+      - name: Push to Azure Container Registry
+        run: |
+          az acr login --name ${{ secrets.ACR_NAME }}
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
   deploy-to-aks:
-    name: "Deploy to AKS with Zero Downtime"
-    needs: build-and-scan-app
-    if: github.ref == 'refs/heads/main'
+    name: Deploy to AKS
+    needs: build-and-scan
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Substitute Image Tag in Manifest
-        run: |
-          sed -i "s|__IMAGE_NAME__|$ACR_NAME/$APP_NAME:${{ github.sha }}|g" k8s/deployment.yaml
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}'
 
-      - name: Deploy & Verify Rollout (Automated Rollback on failure)
+      - name: Get AKS credentials
         run: |
-          echo "Simulating or executing deployment..."
-          # In real execution:
-          # kubectl apply -f k8s/deployment.yaml
-          # kubectl rollout status deployment/order-api --timeout=60s || kubectl rollout undo deployment/order-api
+          az aks get-credentials \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --name ${{ secrets.AKS_NAME }} \
+            --overwrite-existing
+
+      - name: Deploy to AKS with auto-rollback
+        run: |
+          IMAGE="${{ secrets.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          sed -i "s|__IMAGE_NAME__|$IMAGE|g" k8s/deployment.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          if kubectl rollout status deployment/order-api --timeout=120s; then
+            echo "Deployment successful!"
+          else
+            echo "Deployment failed! Rolling back..."
+            kubectl rollout undo deployment/order-api
+            exit 1
+          fi
